@@ -109,7 +109,7 @@ jobs:
             mkdir -p "$HP/lib/llvm/amdgcn"
             ln -s "$HP/amdgcn/bitcode" "$HP/lib/llvm/amdgcn/bitcode"
           fi
-          if ! bash tools/packaging/build_hip_linux.sh; then
+          if ! NO_PACKAGE=1 bash tools/packaging/build_hip_linux.sh; then
             tail -n 35 "$OUT"/*.log "$OUT/build.status"
             exit 1
           fi
@@ -117,9 +117,22 @@ jobs:
           mkdir -p "$OUT/inkling-stage"
           cp "$OUT/b/src/inkling2/strata-inkling" "$OUT/inkling-stage/"
           python3 tools/packaging/collect_libs.py --binary "$OUT/inkling-stage/strata-inkling" --search "$HP/lib" --search "$HP/lib/llvm/lib" --out "$OUT/inkling-stage" --also 'libamd_comgr.so*' --also 'libhiprtc*.so*'
+          # The distribution ROCm image links these from the OS. The packages carry them for clean hosts.
+          for stage in "$OUT/stage" "$OUT/inkling-stage"; do
+            mkdir -p "$stage/licenses"
+            for entry in libz.so.1:zlib1g libzstd.so.1:libzstd1 libdrm.so.2:libdrm2 libelf.so.1:libelf1t64 libnuma.so.1:libnuma1; do
+              lib=${entry%:*}
+              cp -L "/usr/lib/x86_64-linux-gnu/$lib" "$stage/$lib"
+              patchelf --set-rpath '$ORIGIN' "$stage/$lib"
+              cp "/usr/share/doc/${entry#*:}/copyright" "$stage/licenses/$lib.txt"
+            done
+          done
           for lib in "$OUT/inkling-stage/strata-inkling" "$OUT/inkling-stage"/*.so*; do
             patchelf --set-rpath '$ORIGIN' "$lib"
           done
+          python3 tools/packaging/package_engine.py --src "$OUT/stage" --backend hip --version "$PKGVER" \
+            --out "$OUT/components/engine" --variant "$VARIANT" --tree \
+            --arch gfx1100 --arch gfx1101 --arch gfx1102 --build-id "$COMMIT+rocm"
           python3 tools/packaging/package_engine.py --src "$OUT/inkling-stage" --backend hip --version "$PKGVER" \
             --out "$OUT/components/inkling2" --variant "$VARIANT" --shape inkling2 --tree \
             --arch gfx1100 --arch gfx1101 --arch gfx1102 --build-id "$COMMIT+rocm"
