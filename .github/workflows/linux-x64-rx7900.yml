@@ -2,6 +2,12 @@ name: Linux x64 and HIP RX 7900 artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        description: Artifacts to build
+        default: all
+        options: [all, linux, hip]
 
 permissions:
   contents: read
@@ -9,6 +15,7 @@ permissions:
 jobs:
   linux:
     name: Linux x64 AppImage and Terminal
+    if: inputs.target != 'hip'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
@@ -46,6 +53,16 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
+          # Harness is an external build input. Reuse the matching release's staged bundle.
+          release="$RUNNER_TEMP/upstream.AppImage"
+          curl -fsSL --retry 3 https://github.com/Niko1221/Strata/releases/download/v0.2.20/Strata-0.2.20-linux-x86_64.AppImage -o "$release"
+          echo "10cc4a0ac5fd6f4d46e7108147e98ae5d4e818bd666f08e20a17daab439f011d  $release" | sha256sum -c -
+          chmod +x "$release"
+          unsquashfs -no-progress -o "$("$release" --appimage-offset)" -d "$RUNNER_TEMP/upstream-app" "$release" 'usr/lib/*/harness'
+          harness=$(find "$RUNNER_TEMP/upstream-app/usr/lib" -type d -name harness -print -quit)
+          test -n "$harness"
+          mkdir -p app/desktop/src-tauri/resources/{harness,engine-bundle}
+          cp -a "$harness/." app/desktop/src-tauri/resources/harness/
           app/desktop/scripts/fetch-node.sh --target linux-x64
           npm ci --prefix app/host
           npm --prefix app/host run build
@@ -63,6 +80,7 @@ jobs:
 
   hip:
     name: HIP RX 7900 engines
+    if: inputs.target != 'linux'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container: rocm/dev-ubuntu-24.04:7.2.4-complete
